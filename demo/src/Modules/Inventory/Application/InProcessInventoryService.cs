@@ -31,29 +31,48 @@ public class InProcessInventoryService : IInventoryService
             WHERE product_id = @productId AND available_quantity >= @qty
             RETURNING product_id, sku, name, price, available_quantity, reserved_quantity, sold_quantity;";
 
-        var pId = new NpgsqlParameter("@productId", request.ProductId);
-        var pQty = new NpgsqlParameter("@qty", request.Quantity);
-
-        var updatedStock = await _dbContext.Stocks
-            .FromSqlRaw(sql, pId, pQty)
-            .AsNoTracking()
-            .FirstOrDefaultAsync(cancellationToken);
-
-        if (updatedStock != null)
+        var conn = _dbContext.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
         {
+            await conn.OpenAsync(cancellationToken);
+        }
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+
+        var pId = cmd.CreateParameter();
+        pId.ParameterName = "@productId";
+        pId.Value = request.ProductId;
+        cmd.Parameters.Add(pId);
+
+        var pQty = cmd.CreateParameter();
+        pQty.ParameterName = "@qty";
+        pQty.Value = request.Quantity;
+        cmd.Parameters.Add(pQty);
+
+        await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+        if (await reader.ReadAsync(cancellationToken))
+        {
+            var pName = reader.GetString(2);
+            var uPrice = reader.GetDecimal(3);
+            var avail = reader.GetInt32(4);
+            var res = reader.GetInt32(5);
+
             _logger.LogInformation(
                 "[INVENTORY] [RESERVE-SUCCESS] Giữ thành công {Quantity} sản phẩm '{Name}' (Order: {OrderId}). Còn khả dụng: {Available}, Đang giữ: {Reserved}.",
-                request.Quantity, updatedStock.Name, request.OrderId, updatedStock.AvailableQuantity, updatedStock.ReservedQuantity);
+                request.Quantity, pName, request.OrderId, avail, res);
 
             return new ReserveStockResult(
                 Success: true,
-                Message: $"Đã giữ thành công {request.Quantity} sản phẩm '{updatedStock.Name}'.",
-                AvailableQuantity: updatedStock.AvailableQuantity,
-                ReservedQuantity: updatedStock.ReservedQuantity,
-                ProductName: updatedStock.Name,
-                UnitPrice: updatedStock.Price
+                Message: $"Đã giữ thành công {request.Quantity} sản phẩm '{pName}'.",
+                AvailableQuantity: avail,
+                ReservedQuantity: res,
+                ProductName: pName,
+                UnitPrice: uPrice
             );
         }
+
+        await reader.CloseAsync();
 
         // Kiểm tra nguyên nhân thất bại: Hết hàng hay không tồn tại
         var current = await _dbContext.Stocks.AsNoTracking().FirstOrDefaultAsync(s => s.ProductId == request.ProductId, cancellationToken);

@@ -1,110 +1,168 @@
+using Microsoft.EntityFrameworkCore;
 using Modules.Inventory;
-using Modules.Inventory.Contracts.DTOs;
+using Modules.Inventory.Application;
+using Modules.Inventory.Domain;
 using Modules.Notification;
 using Modules.Notification.Consumers;
 using Modules.Order;
-using Modules.Order.Application;
-using Modules.Order.Application.DTOs;
 using Shared.Kernel.RabbitMQ;
+
+// Nạp cấu hình từ .env cục bộ nếu có (tuyệt đối không commit file .env chứa mật khẩu lên git)
+LoadDotEnv();
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Khởi tạo RabbitMQ Broker chung
-var broker = new RabbitMqBroker(msg => Console.WriteLine($"[RabbitMQ-Web] {msg}"));
+static void LoadDotEnv()
+{
+    var dir = new DirectoryInfo(Directory.GetCurrentDirectory());
+    while (dir != null)
+    {
+        var envFile = Path.Combine(dir.FullName, ".env");
+        if (File.Exists(envFile))
+        {
+            foreach (var line in File.ReadAllLines(envFile))
+            {
+                var trimmed = line.Trim();
+                if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith("#")) continue;
+                var parts = trimmed.Split('=', 2);
+                if (parts.Length == 2 && string.IsNullOrEmpty(Environment.GetEnvironmentVariable(parts[0].Trim())))
+                {
+                    Environment.SetEnvironmentVariable(parts[0].Trim(), parts[1].Trim());
+                }
+            }
+            break;
+        }
+        dir = dir.Parent;
+    }
+}
 
-// Khởi tạo các Modules trong Modular Monolith
-var dataDir = Path.Combine(AppContext.BaseDirectory, "web_data");
-Directory.CreateDirectory(dataDir);
+// 1. Cấu hình Connection String PostgreSQL
+var pgHost = Environment.GetEnvironmentVariable("POSTGRES_HOST") ?? builder.Configuration["ConnectionStrings:Host"] ?? "localhost";
+var pgPort = Environment.GetEnvironmentVariable("POSTGRES_PORT") ?? builder.Configuration["ConnectionStrings:Port"] ?? "5432";
+var pgDb = Environment.GetEnvironmentVariable("POSTGRES_DB") ?? builder.Configuration["ConnectionStrings:Database"] ?? "buoi12_db";
+var pgUser = Environment.GetEnvironmentVariable("POSTGRES_USER") ?? builder.Configuration["ConnectionStrings:Username"] ?? "postgres";
+var pgPass = Environment.GetEnvironmentVariable("POSTGRES_PASSWORD") ?? builder.Configuration["ConnectionStrings:Password"] ?? "postgres";
 
-var (inventoryService, invConsumer) = InventoryModuleExtensions.InitializeInventoryModule(
-    broker, Path.Combine(dataDir, "inventory"), msg => Console.WriteLine($"[Inv-Web] {msg}"));
+var connectionString = $"Host={pgHost};Port={pgPort};Database={pgDb};Username={pgUser};Password={pgPass};";
 
-var notifConsumer = NotificationModuleExtensions.InitializeNotificationModule(
-    broker, Path.Combine(dataDir, "notification"), msg => Console.WriteLine($"[Notif-Web] {msg}"));
+// 2. Cấu hình RabbitMQ Connection
+var rmqHost = Environment.GetEnvironmentVariable("RABBITMQ_HOST") ?? builder.Configuration["RabbitMQ:Host"] ?? "localhost";
+var rmqPort = int.TryParse(Environment.GetEnvironmentVariable("RABBITMQ_PORT") ?? builder.Configuration["RabbitMQ:Port"], out var p) ? p : 5672;
+var rmqUser = Environment.GetEnvironmentVariable("RABBITMQ_USER") ?? builder.Configuration["RabbitMQ:Username"] ?? "guest";
+var rmqPass = Environment.GetEnvironmentVariable("RABBITMQ_PASSWORD") ?? builder.Configuration["RabbitMQ:Password"] ?? "guest";
 
-var orderService = OrderModuleExtensions.InitializeOrderModule(
-    inventoryService, broker, Path.Combine(dataDir, "order"), msg => Console.WriteLine($"[Order-Web] {msg}"));
+builder.Services.AddSingleton<IRabbitMqConnection>(sp =>
+{
+    var logger = sp.GetRequiredService<ILogger<RabbitMqConnection>>();
+    return new RabbitMqConnection(rmqHost, rmqPort, rmqUser, rmqPass, logger);
+});
 
-builder.Services.AddSingleton(inventoryService);
-builder.Services.AddSingleton(orderService);
-builder.Services.AddSingleton(notifConsumer);
-builder.Services.AddSingleton<IRabbitMqBroker>(broker);
+builder.Services.AddSingleton<IRabbitMqPublisher, RabbitMqPublisher>();
+
+// 3. Đăng ký 3 Module độc lập (Mỗi module có schema riêng biệt)
+builder.Services.AddInventoryModule(builder.Configuration, connectionString);
+builder.Services.AddOrderModule(connectionString);
+builder.Services.AddNotificationModule(connectionString);
 
 var app = builder.Build();
 
-app.MapGet("/", () => Results.Ok(new
+// 4. Khởi tạo CSDL, Schemas, và Topology RabbitMQ lúc Startup
+using (var scope = app.Services.CreateScope())
 {
-    Title = "Modular Monolithic E-Commerce Server - Buổi 12",
-    Architecture = "Modular Monolithic (Single Process, Isolated Schemas, In-Process Seams + RabbitMQ Pub/Sub)",
+    var rmq = scope.ServiceProvider.GetRequiredService<IRabbitMqConnection>();
+    await rmq.InitializeTopologyAsync();
+
+    await InventoryModuleExtensions.SeedInventoryDataAsync(app.Services);
+    await OrderModuleExtensions.SeedOrderDataAsync(app.Services);
+    await NotificationModuleExtensions.SeedNotificationDataAsync(app.Services);
+}
+
+// 5. Đăng ký Endpoints cho các Module
+app.MapInventoryEndpoints();
+app.MapOrderEndpoints();
+app.MapNotificationEndpoints();
+
+// Root API: Giới thiệu hệ thống
+app.MapGet("/", (IConfiguration config) => Results.Ok(new
+{
+    Title = "Modular Monolithic E-Commerce Server — Buổi 12",
+    Architecture = "Modular Monolithic (.NET 10, PostgreSQL 3 schemas, RabbitMQ AMQP)",
+    InventorySyncMode = config["Inventory:Mode"] ?? "InProcess",
     Modules = new[] { "Order", "Inventory", "Notification" },
-    Endpoints = new[]
+    Databases = new
     {
-        "POST /api/orders -> Tạo đơn hàng (Gọi đồng bộ kiểm tra kho, nếu đủ hàng bắn sự kiện OrderCreated lên RabbitMQ)",
-        "GET /api/inventory/{productId} -> Kiểm tra tồn kho sản phẩm",
-        "POST /api/inventory/restock -> Nhập kho",
-        "GET /api/notifications -> Danh sách thông báo đã nhận từ RabbitMQ Event",
-        "POST /api/demo/offline-consumer-toggle -> Bật/Tắt Consumer Notification để test tính tin cậy RabbitMQ"
+        Type = "PostgreSQL 16 (Single Physical Server)",
+        Schemas = new[] { "inventory", "order", "notification" }
+    },
+    MessageBroker = new
+    {
+        Type = "RabbitMQ AMQP 0-9-1",
+        Exchange = "order.events (Fanout, Durable)",
+        Queues = new[] { "inventory.order-created", "notification.order-created" }
     }
 }));
 
-// API: Tạo đơn hàng
-app.MapPost("/api/orders", async (CreateOrderRequest request, OrderService orders) =>
+// Demo API: Trạng thái hàng đợi & CSDL
+app.MapGet("/demo/status", async (IRabbitMqConnection rmq, NotificationOrderCreatedConsumer notifConsumer, InProcessInventoryService inv) =>
 {
-    var result = await orders.PlaceOrderAsync(request);
-    if (!result.Success)
-    {
-        return Results.BadRequest(new
-        {
-            Error = "OUT_OF_STOCK",
-            Message = result.Message,
-            OrderId = result.OrderId,
-            Status = result.Status.ToString()
-        });
-    }
+    var laptop = await inv.GetStockAsync(Guid.Parse("11111111-1111-1111-1111-111111111111"));
+    var mouse = await inv.GetStockAsync(Guid.Parse("22222222-2222-2222-2222-222222222222"));
+    var lastLaptop = await inv.GetStockAsync(Guid.Parse("33333333-3333-3333-3333-333333333333"));
 
-    return Results.Created($"/api/orders/{result.OrderId}", new
+    uint invCount = await rmq.GetMessageCountAsync(RabbitMqConstants.InventoryOrderCreatedQueue);
+    uint notifCount = await rmq.GetMessageCountAsync(RabbitMqConstants.NotificationOrderCreatedQueue);
+    uint dlqCount = await rmq.GetMessageCountAsync(RabbitMqConstants.DeadLetterQueue);
+
+    return Results.Ok(new
     {
-        Message = result.Message,
-        OrderId = result.OrderId,
-        Status = result.Status.ToString(),
-        TotalAmount = result.TotalAmount
+        NotificationConsumer = new
+        {
+            Queue = RabbitMqConstants.NotificationOrderCreatedQueue,
+            IsOnline = notifConsumer.IsActive,
+            Status = notifConsumer.IsActive ? "ONLINE" : "OFFLINE"
+        },
+        RabbitMqQueues = new
+        {
+            InventoryQueue_Depth = invCount,
+            NotificationQueue_Depth = notifCount,
+            DeadLetterQueue_Depth = dlqCount
+        },
+        InventoryStocks = new[] { laptop, mouse, lastLaptop }
     });
 });
 
-// API: Kiểm tra tồn kho
-app.MapGet("/api/inventory/{productId:guid}", async (Guid productId, Modules.Inventory.Contracts.IInventoryService inventory) =>
+// Demo API: Reset CSDL và Hàng đợi về trạng thái ban đầu
+app.MapPost("/demo/reset", async (IServiceProvider sp) =>
 {
-    var info = await inventory.GetStockInfoAsync(productId);
-    return Results.Ok(info);
-});
+    using var scope = sp.CreateScope();
+    var rmq = scope.ServiceProvider.GetRequiredService<IRabbitMqConnection>();
+    var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
 
-// API: Nhập thêm kho
-app.MapPost("/api/inventory/restock", async (Guid productId, int quantity, Modules.Inventory.Contracts.IInventoryService inventory) =>
-{
-    var ok = await inventory.RestockAsync(productId, quantity);
-    return ok ? Results.Ok(new { Message = $"Đã nhập thêm {quantity} sản phẩm." }) : Results.NotFound();
-});
+    logger.LogInformation("[DEMO-RESET] Đang reset dữ liệu demo về trạng thái ban đầu...");
 
-// API: Xem danh sách log thông báo
-app.MapGet("/api/notifications", (NotificationOrderCreatedConsumer consumer) =>
-{
-    return Results.Ok(consumer.GetLogs());
-});
+    // Purge queues
+    await rmq.PurgeQueueAsync(RabbitMqConstants.InventoryOrderCreatedQueue);
+    await rmq.PurgeQueueAsync(RabbitMqConstants.NotificationOrderCreatedQueue);
+    await rmq.PurgeQueueAsync(RabbitMqConstants.DeadLetterQueue);
 
-// API: Bật/Tắt Consumer Notification để thực nghiệm Offline
-app.MapPost("/api/demo/offline-consumer-toggle", (IRabbitMqBroker rabbit) =>
-{
-    const string queueName = "order.notification";
-    if (rabbit.IsConsumerOnline(queueName))
+    // Reset inventory stocks in DB
+    await InventoryModuleExtensions.ResetInventoryDataAsync(sp);
+
+    // Reset orders
+    await OrderModuleExtensions.ResetOrderDataAsync(sp);
+
+    // Reset notification logs
+    await NotificationModuleExtensions.ResetNotificationDataAsync(sp);
+
+    logger.LogInformation("[DEMO-RESET] ✔ Dữ liệu đã được reset: Laptop=5, Chuột=0, Laptop-cuối=1, Hàng đợi trống.");
+    return Results.Ok(new
     {
-        rabbit.DisconnectConsumer(queueName);
-        return Results.Ok(new { Status = "OFFLINE", Message = "Notification Consumer đã TẮT. Các sự kiện mới sẽ được lưu trên đĩa RabbitMQ!" });
-    }
-    else
-    {
-        rabbit.ReconnectConsumer(queueName);
-        return Results.Ok(new { Status = "ONLINE", Message = "Notification Consumer đã BẬT lại. Các sự kiện tồn đọng đã được xử lý!" });
-    }
+        Success = true,
+        Message = "Dữ liệu demo đã được reset thành công: Laptop=5, Chuột=0, Laptop-cuối=1."
+    });
 });
 
 app.Run();
+
+// Public class for WebApplicationFactory in tests
+public partial class Program { }

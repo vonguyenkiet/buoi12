@@ -1,0 +1,106 @@
+### BUỔI 12: MODULAR MONOLITHIC — BỘ REQUESTS THỰC THI DEMO
+@baseUrl = http://localhost:5000
+
+### =========================================================================
+### BƯỚC 0: Khởi tạo lại trạng thái kho mẫu (Reset dữ liệu sạch)
+### Laptop: 5 chiếc | Chuột: 0 chiếc (Hết hàng) | Laptop-cuối: 1 chiếc
+### =========================================================================
+POST {{baseUrl}}/demo/reset
+Content-Type: application/json
+
+### =========================================================================
+### BƯỚC 1: Kiểm tra cấu trúc ranh giới & tồn kho ban đầu (Demo 1)
+### =========================================================================
+GET {{baseUrl}}/demo/status
+Accept: application/json
+
+### =========================================================================
+### BƯỚC 2: Gọi đồng bộ — Tình huống ĐỦ HÀNG (Demo 2.1)
+### Đặt mua 2 chiếc "Laptop Gaming Pro 16" (ID: 11111111-1111-1111-1111-111111111111)
+### Kỳ vọng: HTTP 201 Created | Status = "Confirmed" | Giữ hàng -> Trừ hàng
+### =========================================================================
+POST {{baseUrl}}/api/orders
+Content-Type: application/json
+
+{
+  "customerId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+  "items": [
+    {
+      "productId": "11111111-1111-1111-1111-111111111111",
+      "quantity": 2
+    }
+  ]
+}
+
+### =========================================================================
+### BƯỚC 3: Gọi đồng bộ — Tình huống HẾT HÀNG (Demo 2.2)
+### Đặt mua 1 chiếc "Chuột Không Dây RGB" (ID: 22222222-2222-2222-2222-222222222222, Tồn kho = 0)
+### Kỳ vọng: HTTP 409 Conflict | Status = "Rejected" | Thông báo hết hàng
+### =========================================================================
+POST {{baseUrl}}/api/orders
+Content-Type: application/json
+
+{
+  "customerId": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+  "items": [
+    {
+      "productId": "22222222-2222-2222-2222-222222222222",
+      "quantity": 1
+    }
+  ]
+}
+
+### =========================================================================
+### BƯỚC 4: Kiểm tra lịch sử gửi thông báo bất đồng bộ (Notification Log)
+### Xem email giả lập (mô phỏng) được tạo ra từ sự kiện OrderCreated
+### =========================================================================
+GET {{baseUrl}}/api/notifications
+Accept: application/json
+
+### =========================================================================
+### BƯỚC 5: Thực nghiệm Consumer Offline — DỪNG Notification Consumer (Demo 3.1)
+### =========================================================================
+POST {{baseUrl}}/demo/consumers/notification/stop
+Content-Type: application/json
+
+### =========================================================================
+### BƯỚC 6: Đặt hàng mới trong lúc Notification Consumer đang TẮT (Demo 3.2)
+### Khách mua 1 chiếc Laptop Pro
+### =========================================================================
+POST {{baseUrl}}/api/orders
+Content-Type: application/json
+
+{
+  "customerId": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+  "items": [
+    {
+      "productId": "11111111-1111-1111-1111-111111111111",
+      "quantity": 1
+    }
+  ]
+}
+
+### =========================================================================
+### BƯỚC 7: Kiểm tra RabbitMQ Queue: Tin nhắn NẰM CHỜ TRÊN ĐĨA (Ready = 1) (Demo 3.3)
+### Mở trình duyệt xem UI: http://localhost:15672 (guest/guest)
+### Hoặc gọi API kiểm tra độ sâu hàng đợi:
+### =========================================================================
+GET {{baseUrl}}/demo/status
+Accept: application/json
+
+### =========================================================================
+### BƯỚC 8: Khởi động lại Notification Consumer (Demo 3.4)
+### Consumer kéo tin tồn đọng về xử lý, ghi notification_logs, gửi basicAck -> Ready = 0!
+### =========================================================================
+POST {{baseUrl}}/demo/consumers/notification/start
+Content-Type: application/json
+
+### =========================================================================
+### BƯỚC 9: Kiểm tra lại Notification Logs & Trạng thái Queue sau hồi phục
+### =========================================================================
+GET {{baseUrl}}/api/notifications
+Accept: application/json
+
+###
+GET {{baseUrl}}/demo/status
+Accept: application/json

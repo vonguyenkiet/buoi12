@@ -2,68 +2,31 @@ namespace Modules.Order.Domain;
 
 public enum OrderStatus
 {
-    Pending,
     Confirmed,
     Rejected
 }
 
-/// <summary>
-/// Domain Entity Order (Aggregate Root).
-/// </summary>
 public class Order
 {
-    public Guid Id { get; private set; }
-    public Guid CustomerId { get; private set; }
-    public OrderStatus Status { get; private set; }
-    public decimal TotalAmount { get; private set; }
-    public DateTime CreatedAt { get; private set; }
-    public List<OrderLineItem> Items { get; private set; } = new();
-
-    public Order(Guid customerId)
-    {
-        Id = Guid.NewGuid();
-        CustomerId = customerId;
-        Status = OrderStatus.Pending;
-        CreatedAt = DateTime.UtcNow;
-    }
-
-    public void AddItem(Guid productId, string productName, int quantity, decimal unitPrice)
-    {
-        var lineItem = new OrderLineItem(productId, productName, quantity, unitPrice);
-        Items.Add(lineItem);
-        TotalAmount += (quantity * unitPrice);
-    }
-
-    public void Confirm()
-    {
-        Status = OrderStatus.Confirmed;
-    }
-
-    public void Reject(string reason)
-    {
-        Status = OrderStatus.Rejected;
-    }
+    public Guid Id { get; set; }
+    public Guid CustomerId { get; set; }
+    public OrderStatus Status { get; set; }
+    public decimal TotalAmount { get; set; }
+    public string? FailureReason { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public List<OrderItem> Items { get; set; } = new();
 }
 
 /// <summary>
-/// OrderLineItem thể hiện tính bất biến của Snapshot Pattern:
-/// Lưu ProductNameSnapshot và UnitPriceSnapshot tại thời điểm đặt hàng.
-/// CẤM TUYỆT ĐỐI SQL JOIN sang Catalog Module hay Inventory Module.
+/// Snapshot Pattern: Lưu trữ bản chụp bất biến của sản phẩm tại thời điểm mua.
+/// Cấm tuyệt đối SQL JOIN sang schema catalog hay inventory.
 /// </summary>
-public class OrderLineItem
+public class OrderItem
 {
-    public Guid Id { get; private set; }
-    public Guid ProductId { get; private set; }
-    public string ProductNameSnapshot { get; private set; }
-    public decimal UnitPriceSnapshot { get; private set; }
-    public int Quantity { get; private set; }
-
-    public OrderLineItem(Guid productId, string productName, int quantity, decimal unitPrice)
-    {
-        Id = Guid.NewGuid();
-        ProductId = productId;
-        ProductNameSnapshot = productName;
-        Quantity = quantity;
-        UnitPriceSnapshot = unitPrice;
-    }
+    public Guid Id { get; set; }
+    public Guid OrderId { get; set; }
+    public Guid ProductId { get; set; }
+    public string ProductNameSnapshot { get; set; } = string.Empty;
+    public decimal UnitPriceSnapshot { get; set; }
+    public int Quantity { get; set; }
 }

@@ -7,7 +7,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Shared\Shared.Kernel.csproj" />
-    <ProjectReference Include="..\Modules\Inventory\Inventory.Contracts\Inventory.Contracts.csproj" />
+    <ProjectReference Include="..\Modules\Inventory.Contracts\Inventory.Contracts.csproj" />
     <ProjectReference Include="..\Modules\Inventory\Modules.Inventory.csproj" />
     <ProjectReference Include="..\Modules\Order\Modules.Order.csproj" />
     <ProjectReference Include="..\Modules\Notification\Modules.Notification.csproj" />

@@ -24,3 +24,21 @@ web_data/
 .DS_Store
 Thumbs.db
 desktop.ini
+~$*
+
+## Secrets, Credentials & Local Environments (TUYỆT ĐỐI KHÔNG COMMIT LÊN GIT)
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.pfx
+*.p12
+*.token
+*.secret
+*credentials*
+appsettings*.local.json
+appsettings.Local.json
+appsettings.Secrets.json
+appsettings.Production.json
+

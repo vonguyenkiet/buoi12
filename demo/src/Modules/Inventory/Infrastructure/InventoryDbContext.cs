@@ -23,18 +23,22 @@ internal class InventoryDbContext : DbContext
         {
             b.ToTable("stocks");
             b.HasKey(s => s.ProductId);
-            b.Property(s => s.Sku).HasMaxLength(50).IsRequired();
-            b.Property(s => s.Name).HasMaxLength(200).IsRequired();
-            b.Property(s => s.Price).HasPrecision(18, 2);
-            b.Property(s => s.AvailableQuantity).IsRequired();
-            b.Property(s => s.ReservedQuantity).IsRequired();
-            b.Property(s => s.SoldQuantity).IsRequired();
+            b.Property(s => s.ProductId).HasColumnName("product_id");
+            b.Property(s => s.Sku).HasColumnName("sku").HasMaxLength(50).IsRequired();
+            b.Property(s => s.Name).HasColumnName("name").HasMaxLength(200).IsRequired();
+            b.Property(s => s.Price).HasColumnName("price").HasPrecision(18, 2);
+            b.Property(s => s.AvailableQuantity).HasColumnName("available_quantity").IsRequired();
+            b.Property(s => s.ReservedQuantity).HasColumnName("reserved_quantity").IsRequired();
+            b.Property(s => s.SoldQuantity).HasColumnName("sold_quantity").IsRequired();
+            b.Property(s => s.CreatedAt).HasColumnName("created_at").IsRequired();
         });
 
         modelBuilder.Entity<InventoryProcessedEvent>(b =>
         {
             b.ToTable("processed_events");
             b.HasKey(e => e.EventId);
+            b.Property(e => e.EventId).HasColumnName("event_id");
+            b.Property(e => e.ProcessedAt).HasColumnName("processed_at");
         });
     }
 }

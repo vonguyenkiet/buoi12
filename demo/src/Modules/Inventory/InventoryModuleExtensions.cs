@@ -24,8 +24,10 @@ public static class InventoryModuleExtensions
         services.AddDbContext<InventoryDbContext>(options =>
             options.UseNpgsql(connectionString, b => b.MigrationsHistoryTable("__EFMigrationsHistory", "inventory")));
 
-        // Đăng ký implementation InProcess nội bộ
-        services.AddScoped<InProcessInventoryService>();
+        // Đăng ký implementation InProcess nội bộ qua Factory lambda (giữ constructor internal)
+        services.AddScoped(sp => new InProcessInventoryService(
+            sp.GetRequiredService<InventoryDbContext>(),
+            sp.GetRequiredService<ILogger<InProcessInventoryService>>()));
 
         // Cấu hình HttpClient cho HttpInventoryService (loopback trong Modular Monolith, hoặc service ngoài khi tách Microservice)
         var inventoryHttpUrl = configuration["Inventory:HttpUrl"] ?? "http://localhost:5000";
@@ -111,6 +113,39 @@ public static class InventoryModuleExtensions
 
         await db.SaveChangesAsync();
         logger.LogInformation("[INVENTORY] ✔ Đã kiểm tra và khởi tạo dữ liệu mẫu kho hàng.");
+    }
+
+    public static async Task ResetInventoryDataAsync(IServiceProvider serviceProvider)
+    {
+        using var scope = serviceProvider.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<InventoryDbContext>();
+
+        var laptop = await db.Stocks.FindAsync(Guid.Parse("11111111-1111-1111-1111-111111111111"));
+        if (laptop != null)
+        {
+            laptop.AvailableQuantity = 5;
+            laptop.ReservedQuantity = 0;
+            laptop.SoldQuantity = 0;
+        }
+
+        var mouse = await db.Stocks.FindAsync(Guid.Parse("22222222-2222-2222-2222-222222222222"));
+        if (mouse != null)
+        {
+            mouse.AvailableQuantity = 0;
+            mouse.ReservedQuantity = 0;
+            mouse.SoldQuantity = 0;
+        }
+
+        var lastLaptop = await db.Stocks.FindAsync(Guid.Parse("33333333-3333-3333-3333-333333333333"));
+        if (lastLaptop != null)
+        {
+            lastLaptop.AvailableQuantity = 1;
+            lastLaptop.ReservedQuantity = 0;
+            lastLaptop.SoldQuantity = 0;
+        }
+
+        db.ProcessedEvents.RemoveRange(db.ProcessedEvents);
+        await db.SaveChangesAsync();
     }
 
     public static IEndpointRouteBuilder MapInventoryEndpoints(this IEndpointRouteBuilder endpoints)

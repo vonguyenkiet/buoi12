@@ -1,90 +1,51 @@
-using System.Collections.Concurrent;
-using System.Text.Json;
-using OrderEntity = Modules.Order.Domain.Order;
+using Microsoft.EntityFrameworkCore;
 using Modules.Order.Domain;
 
 namespace Modules.Order.Infrastructure;
 
 /// <summary>
-/// Infrastructure Layer nội bộ của Order Module.
-/// Được đánh dấu INTERNAL để ngăn chặn chia sẻ DbContext giữa các module.
-/// Lưu trữ độc lập trong data/order/order_schema.json.
+/// Infrastructure layer nội bộ của Order Module.
+/// Được khai báo INTERNAL để bảo vệ kỷ luật kiến trúc: module khác không thể truy cập DbContext này.
+/// Ánh xạ độc lập vào schema "order" trong PostgreSQL.
 /// </summary>
-internal class OrderDbContext
+internal class OrderDbContext : DbContext
 {
-    private readonly string _storagePath;
-    private readonly ConcurrentDictionary<Guid, OrderEntity> _orders = new();
-    private readonly object _lock = new();
+    public OrderDbContext(DbContextOptions<OrderDbContext> options) : base(options) { }
 
-    public OrderDbContext(string baseDataDir = "data/order")
-    {
-        Directory.CreateDirectory(baseDataDir);
-        _storagePath = Path.Combine(baseDataDir, "order_schema.json");
-        LoadFromDisk();
-    }
+    public DbSet<Domain.Order> Orders => Set<Domain.Order>();
+    public DbSet<OrderItem> OrderItems => Set<OrderItem>();
 
-    private void LoadFromDisk()
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        lock (_lock)
+        modelBuilder.HasDefaultSchema("order");
+
+        modelBuilder.Entity<Domain.Order>(b =>
         {
-            if (File.Exists(_storagePath))
-            {
-                var json = File.ReadAllText(_storagePath);
-                var items = JsonSerializer.Deserialize<List<OrderRecord>>(json);
-                if (items != null)
-                {
-                    _orders.Clear();
-                    foreach (var it in items)
-                    {
-                        var ord = new OrderEntity(it.CustomerId);
-                        // Reflection or direct mapping
-                        typeof(OrderEntity).GetProperty(nameof(OrderEntity.Id))?.SetValue(ord, it.Id);
-                        typeof(OrderEntity).GetProperty(nameof(OrderEntity.Status))?.SetValue(ord, it.Status);
-                        typeof(OrderEntity).GetProperty(nameof(OrderEntity.TotalAmount))?.SetValue(ord, it.TotalAmount);
-                        typeof(OrderEntity).GetProperty(nameof(OrderEntity.CreatedAt))?.SetValue(ord, it.CreatedAt);
-                        foreach (var l in it.Items)
-                        {
-                            ord.AddItem(l.ProductId, l.ProductNameSnapshot, l.Quantity, l.UnitPriceSnapshot);
-                        }
-                        _orders[ord.Id] = ord;
-                    }
-                }
-            }
-        }
-    }
+            b.ToTable("orders");
+            b.HasKey(o => o.Id);
+            b.Property(o => o.Id).HasColumnName("id");
+            b.Property(o => o.CustomerId).HasColumnName("customer_id").IsRequired();
+            b.Property(o => o.Status).HasColumnName("status").HasConversion<string>().HasMaxLength(20).IsRequired();
+            b.Property(o => o.TotalAmount).HasColumnName("total_amount").HasPrecision(18, 2);
+            b.Property(o => o.FailureReason).HasColumnName("failure_reason").HasMaxLength(500);
+            b.Property(o => o.CreatedAt).HasColumnName("created_at").IsRequired();
 
-    public void SaveToDisk()
-    {
-        lock (_lock)
+            b.HasMany(o => o.Items)
+             .WithOne()
+             .HasForeignKey(i => i.OrderId)
+             .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<OrderItem>(b =>
         {
-            var records = _orders.Values.Select(o => new OrderRecord(
-                o.Id,
-                o.CustomerId,
-                o.Status,
-                o.TotalAmount,
-                o.CreatedAt,
-                o.Items.Select(i => new OrderLineRecord(i.Id, i.ProductId, i.ProductNameSnapshot, i.UnitPriceSnapshot, i.Quantity)).ToList()
-            )).ToList();
-
-            var json = JsonSerializer.Serialize(records, new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(_storagePath, json);
-        }
+            b.ToTable("order_items");
+            b.HasKey(i => i.Id);
+            b.Property(i => i.Id).HasColumnName("id");
+            b.Property(i => i.OrderId).HasColumnName("order_id").IsRequired();
+            b.Property(i => i.ProductId).HasColumnName("product_id").IsRequired();
+            b.Property(i => i.ProductNameSnapshot).HasColumnName("product_name_snapshot").HasMaxLength(200).IsRequired();
+            b.Property(i => i.UnitPriceSnapshot).HasColumnName("unit_price_snapshot").HasPrecision(18, 2);
+            b.Property(i => i.Quantity).HasColumnName("quantity").IsRequired();
+        });
     }
-
-    public void Save(OrderEntity order)
-    {
-        _orders[order.Id] = order;
-        SaveToDisk();
-    }
-
-    public OrderEntity? FindById(Guid id)
-    {
-        _orders.TryGetValue(id, out var ord);
-        return ord;
-    }
-
-    public IEnumerable<OrderEntity> GetAll() => _orders.Values;
-
-    private record OrderLineRecord(Guid Id, Guid ProductId, string ProductNameSnapshot, decimal UnitPriceSnapshot, int Quantity);
-    private record OrderRecord(Guid Id, Guid CustomerId, OrderStatus Status, decimal TotalAmount, DateTime CreatedAt, List<OrderLineRecord> Items);
 }

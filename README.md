@@ -19,21 +19,31 @@ Dự án này là bộ tài liệu hoàn chỉnh và mã nguồn thực thi mẫ
 
 ```
 .
-├── slide_buoi_12.pptx                 # [Slide Thuyết trình] 32 slide PowerPoint tông trắng tối giản, đầy đủ Speaker Notes
-├── slide_buoi_12.md                   # [Slide Markdown] Định dạng chuẩn Marp sẵn sàng trình chiếu
-├── tai_lieu_nghien_cuu_buoi_12.md     # [Tài liệu Nghiên cứu] Báo cáo hàn lâm chuyên sâu 5 chương hoàn chỉnh
+├── docker-compose.yml                 # Khởi chạy PostgreSQL 16 & RabbitMQ 3.13 Management
+├── init-db.sql                        # Script DDL khởi tạo sẵn 3 schema độc lập và các bảng
+├── .env.example                       # Cấu hình môi trường mẫu (không chứa mật khẩu thật)
+├── DEMO_SCRIPT.md                     # Kịch bản 9 bước thuyết trình demo chuẩn 10 phút
+├── slide_buoi_12.pptx                 # [Slide Thuyết trình] 20 slide PowerPoint tông trắng tối giản, đủ Speaker Notes
+├── slide_buoi_12.md                   # [Slide Markdown] Định dạng Marp sẵn sàng trình chiếu
+├── tai_lieu_nghien_cuu_buoi_12.md     # [Giáo trình Lý thuyết] Báo cáo hàn lâm chuyên sâu 5 chương
 ├── ngan_hang_cau_hoi_phan_bien_buoi_12.md # [Ngân hàng Q&A] 15 câu hỏi phản biện hội đồng chia đều 4 mảng
-├── demo/                              # [Mã Nguồn Demo] Giải pháp Modular Monolithic mẫu trên nền tảng .NET 10 (C#)
+├── docs/
+│   ├── AUDIT.md                       # Báo cáo kiểm toán hiện trạng kỹ thuật
+│   └── EVIDENCE.md                    # Bằng chứng thực thi thật (Logs, Output, Test run)
+├── demo/
 │   ├── ModularMonolithDemo.slnx       # Solution .NET 10 quản lý các projects
-│   ├── README.md                      # Hướng dẫn chi tiết chạy 4 phần demo
-│   └── src/
-│       ├── Shared/Shared.Kernel/      # Event contracts & Mô phỏng RabbitMQ Broker
-│       ├── Modules/
-│       │   ├── Inventory/             # Module Quản lý Tồn kho & SKU (Schema riêng)
-│       │   ├── Order/                 # Module Xử lý Đơn hàng (Snapshot Pattern, Schema riêng)
-│       │   └── Notification/          # Module Gửi Thông báo Email/SMS (Schema riêng)
-│       ├── Host/ModularMonolith.Web/  # ASP.NET Core Web API (REST Endpoints)
-│       └── Runner/ModularMonolith.Runner/ # CLI Console tự động chạy kịch bản 4 demo bắt buộc
+│   ├── requests.http                  # Bộ kịch bản HTTP requests test từng bước demo
+│   ├── race.ps1                       # Script PowerShell kiểm chứng tranh chấp đồng thời
+│   ├── src/
+│   │   ├── Host/ModularMonolith.Web/  # ASP.NET Core Web API (Endpoints chính & Demo endpoints)
+│   │   ├── Modules/
+│   │   │   ├── Inventory.Contracts/   # Public Interface IInventoryService & DTOs
+│   │   │   ├── Inventory/             # Module Quản lý Tồn kho & SKU (Schema 'inventory')
+│   │   │   ├── Order/                 # Module Xử lý Đơn hàng (Schema 'order')
+│   │   │   └── Notification/          # Module Gửi Thông báo (Schema 'notification')
+│   │   └── Shared/Shared.Kernel/      # RabbitMQ Connection & Event Contracts
+│   └── tests/
+│       └── ModularMonolith.Tests/     # Bộ 5 bài test tự động xUnit & NetArchTest
 ├── Buổi 12 Modular Monolithic...pdf   # Tài liệu gốc của môn học
 ├── Kế Hoạch Phân Công...pdf           # Kế hoạch phân công nghiên cứu lý thuyết
 └── Phan_cong_ly_thuyet_Buoi_12.pdf    # Quy định phân công nhóm
@@ -41,27 +51,28 @@ Dự án này là bộ tài liệu hoàn chỉnh và mã nguồn thực thi mẫ
 
 ---
 
-## 🚀 HƯỚNG DẪN CHẠY DEMO
+## 🚀 HƯỚNG DẪN CHẠY DEMO & KIỂM CHỨNG
 
-Yêu cầu môi trường: Cài đặt **.NET 10 SDK** (hoặc .NET 8/9 trở lên).
-
-### 1. Chạy Trình Diễn Tự Động Toàn Bộ 4 Phần Demo (Dành cho Buổi Thuyết trình)
+### Bước 1: Khởi động Hạ tầng Docker (PostgreSQL & RabbitMQ)
 ```bash
-cd demo
-dotnet run --project src/Runner/ModularMonolith.Runner.csproj
+docker compose up -d
 ```
-Màn hình console sẽ tự động thực thi và trực quan hóa:
-- **Demo 1:** Bằng chứng cô lập 3 schema CSDL (`inventory_schema.json`, `order_schema.json`, `notification_schema.json`), không có SQL JOIN chéo, DbContext nội bộ.
-- **Demo 2:** Lời gọi đồng bộ kiểm tra tồn kho (Trường hợp đủ hàng $\rightarrow$ tạo đơn thành công; Trường hợp hết hàng $\rightarrow$ từ chối tạo đơn ngay lập tức).
-- **Demo 3:** Lời gọi bất đồng bộ qua RabbitMQ Fanout Pub/Sub và **thực nghiệm tắt Consumer Notification** để chứng minh dữ liệu lưu trữ bền vững trên đĩa cứng (**Zero Message Loss**).
-- **Demo 4:** Trực quan hóa con đường tiến hóa bóc tách module Inventory thành Microservice mà không sửa đổi một dòng code nghiệp vụ nào.
+* PostgreSQL lắng nghe cổng `5432` (tự động tạo 3 schema: `inventory`, `order`, `notification`).
+* RabbitMQ lắng nghe cổng `5672` (AMQP) và `15672` (Management Dashboard tại `http://localhost:15672`).
 
-### 2. Chạy Web API Server
+### Bước 2: Chạy Server Web API
 ```bash
-cd demo
-dotnet run --project src/Host/ModularMonolith.Web.csproj
+dotnet run --project demo/src/Host/ModularMonolith.Web.csproj --urls "http://localhost:5000"
 ```
-Truy cập `http://localhost:5000` để tương tác với các API đặt hàng và quản lý kho.
+* Xem thông tin hệ thống tại `http://localhost:5000/`.
+* Xem trạng thái hàng đợi và tồn kho tại `http://localhost:5000/demo/status`.
+
+### Bước 3: Chạy Bộ Test Tự Động xUnit
+Mở terminal thứ hai và thực thi:
+```bash
+dotnet test demo/ModularMonolithDemo.slnx
+```
+Kết quả kiểm chứng thực tế: **Passed 5/5 tests** (Đủ hàng 201, Hết hàng 409, Tranh chấp đồng thời, Ranh giới kiến trúc NetArchTest, và Kỷ luật CSDL internal).
 
 ---
 

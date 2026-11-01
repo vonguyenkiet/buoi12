@@ -1,63 +1,44 @@
-using System.Collections.Concurrent;
-using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using Modules.Notification.Domain;
 
 namespace Modules.Notification.Infrastructure;
 
 /// <summary>
-/// Infrastructure Layer nội bộ của Notification Module.
-/// Được đánh dấu INTERNAL để đảm bảo nguyên tắc cô lập dữ liệu.
-/// Dữ liệu thông báo lưu độc lập trong data/notification/notification_schema.json.
+/// Infrastructure layer nội bộ của Notification Module.
+/// Được khai báo INTERNAL để bảo vệ kỷ luật kiến trúc: module khác không thể truy cập DbContext này.
+/// Ánh xạ độc lập vào schema "notification" trong PostgreSQL.
 /// </summary>
-internal class NotificationDbContext
+internal class NotificationDbContext : DbContext
 {
-    private readonly string _storagePath;
-    private readonly ConcurrentBag<NotificationLog> _logs = new();
-    private readonly object _lock = new();
+    public NotificationDbContext(DbContextOptions<NotificationDbContext> options) : base(options) { }
 
-    public NotificationDbContext(string baseDataDir = "data/notification")
-    {
-        Directory.CreateDirectory(baseDataDir);
-        _storagePath = Path.Combine(baseDataDir, "notification_schema.json");
-        LoadFromDisk();
-    }
+    public DbSet<NotificationLog> NotificationLogs => Set<NotificationLog>();
+    public DbSet<NotificationProcessedEvent> ProcessedEvents => Set<NotificationProcessedEvent>();
 
-    private void LoadFromDisk()
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        lock (_lock)
+        modelBuilder.HasDefaultSchema("notification");
+
+        modelBuilder.Entity<NotificationLog>(b =>
         {
-            if (File.Exists(_storagePath))
-            {
-                var json = File.ReadAllText(_storagePath);
-                var items = JsonSerializer.Deserialize<List<NotificationLogRecord>>(json);
-                if (items != null)
-                {
-                    foreach (var it in items)
-                    {
-                        _logs.Add(new NotificationLog(it.OrderId, it.Channel, it.Recipient, it.Message));
-                    }
-                }
-            }
-        }
-    }
+            b.ToTable("notification_logs");
+            b.HasKey(n => n.Id);
+            b.Property(n => n.Id).HasColumnName("id");
+            b.Property(n => n.OrderId).HasColumnName("order_id").IsRequired();
+            b.Property(n => n.EventId).HasColumnName("event_id").IsRequired();
+            b.Property(n => n.Channel).HasColumnName("channel").HasMaxLength(20).IsRequired();
+            b.Property(n => n.Recipient).HasColumnName("recipient").HasMaxLength(200).IsRequired();
+            b.Property(n => n.Message).HasColumnName("message").HasMaxLength(1000).IsRequired();
+            b.Property(n => n.IsSimulation).HasColumnName("is_simulation").IsRequired();
+            b.Property(n => n.CreatedAt).HasColumnName("created_at").IsRequired();
+        });
 
-    private void SaveToDisk()
-    {
-        lock (_lock)
+        modelBuilder.Entity<NotificationProcessedEvent>(b =>
         {
-            var records = _logs.Select(l => new NotificationLogRecord(l.Id, l.OrderId, l.Channel, l.Recipient, l.Message, l.SentAt)).ToList();
-            var json = JsonSerializer.Serialize(records, new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(_storagePath, json);
-        }
+            b.ToTable("processed_events");
+            b.HasKey(e => e.EventId);
+            b.Property(e => e.EventId).HasColumnName("event_id");
+            b.Property(e => e.ProcessedAt).HasColumnName("processed_at");
+        });
     }
-
-    public void AddLog(NotificationLog log)
-    {
-        _logs.Add(log);
-        SaveToDisk();
-    }
-
-    public IEnumerable<NotificationLog> GetAll() => _logs;
-
-    private record NotificationLogRecord(Guid Id, Guid OrderId, string Channel, string Recipient, string Message, DateTime SentAt);
 }
