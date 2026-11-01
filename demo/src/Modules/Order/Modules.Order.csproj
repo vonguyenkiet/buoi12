@@ -7,7 +7,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\Shared\Shared.Kernel.csproj" />
-    <ProjectReference Include="..\Inventory\Modules.Inventory.csproj" />
+    <ProjectReference Include="..\Inventory\Inventory.Contracts\Inventory.Contracts.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
+    <PackageReference Include="RabbitMQ.Client" Version="7.0.0" />
+  </ItemGroup>
 </Project>
