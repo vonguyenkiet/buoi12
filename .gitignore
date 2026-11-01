@@ -1,0 +1,26 @@
+## Visual Studio / .NET Core
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+*.user
+*.userosscache
+*.sln.docstates
+.vs/
+.idea/
+.vscode/
+
+## Build & Test Results
+TestResults/
+*.trx
+*.coverage
+
+## Runtime Demo Data
+*data/
+demo_data/
+web_data/
+
+## OS generated files
+.DS_Store
+Thumbs.db
+desktop.ini

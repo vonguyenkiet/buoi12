@@ -1,0 +1,22 @@
+<Solution>
+  <Folder Name="/src/" />
+  <Folder Name="/src/Host/">
+    <Project Path="src/Host/ModularMonolith.Web.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/" />
+  <Folder Name="/src/Modules/Inventory/">
+    <Project Path="src/Modules/Inventory/Modules.Inventory.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Notification/">
+    <Project Path="src/Modules/Notification/Modules.Notification.csproj" />
+  </Folder>
+  <Folder Name="/src/Modules/Order/">
+    <Project Path="src/Modules/Order/Modules.Order.csproj" />
+  </Folder>
+  <Folder Name="/src/Runner/">
+    <Project Path="src/Runner/ModularMonolith.Runner.csproj" />
+  </Folder>
+  <Folder Name="/src/Shared/">
+    <Project Path="src/Shared/Shared.Kernel.csproj" />
+  </Folder>
+</Solution>
